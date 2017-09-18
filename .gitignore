@@ -1,3 +1,6 @@
 
 output.txt
 *.pyc
+data.pic
+output.wav
+transcribed.txt
