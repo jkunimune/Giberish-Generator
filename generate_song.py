@@ -12,7 +12,7 @@ import tempfile
 import wave
 
 
-MEMORY_DECAY = .3 #the last last phoneme has about this as much effect as the last phoneme
+MEMORY_DECAY = .4 #the last last phoneme has about this as much effect as the last phoneme
 MIN_ORDER = 2
 MAX_ORDER = int(math.log(.01, MEMORY_DECAY)) #automatically stop memorising when the effect becomes negligible
 PREF_LENGTH = 30
@@ -27,7 +27,7 @@ def learn_english():
 		transitions.append(defaultdict(lambda:np.zeros(len(CHARACTER))))
 
 	with open('input.txt','r') as f:
-		inline = re.sub(r'\r\n+', ' ', f.read())
+		inline = re.sub(r'\n+', ' ', f.read())
 		proc = subprocess.run(['espeak','-v','en-us','-q','-x',inline], encoding='ascii', stdout=subprocess.PIPE)
 		source = re.sub(r'[;!]', '', re.sub(r'\n ', '\n', proc.stdout)) #I've no idea from whence these ;s and !s come, but they ruin everything.
 		print('"""')
@@ -46,7 +46,7 @@ def learn_english():
 	return transitions
 
 
-def markov_chain(seed, transitions, length=float('inf'), force_length=True):
+def markov_chain(seed, transitions, length=float('inf'), force_length=True, not_first=None):
 	line = seed
 	while True:
 		vector = np.zeros(len(CHARACTER))
@@ -55,16 +55,18 @@ def markov_chain(seed, transitions, length=float('inf'), force_length=True):
 				vector = vector + (MEMORY_DECAY**i) * (transitions[i][line[:i]]/transitions[i][line[:i]].sum())
 			else:
 				break
-		if len(line) >= length and vector[INDEX['\n']]/vector.sum() > .01:
-			break #exit if we are at capacity and a newline next is plausible
-		if force_length:
-			vector[INDEX['\n']] = 0 #there can be no newline if the length is fixed
-		if vector.sum() == 0:
-			break #exit if there is literally no possible next step (unlikely)
+		if len(line) >= length and vector[INDEX['\n']]/vector.sum() > .01: #exit if we are at capacity and a newline next is plausible
+			break
+		if force_length: #there can be no newline if the length is fixed
+			vector[INDEX['\n']] = 0
+		if line == seed and not_first is not None: #prevent some character from happening next (for rhyming purposes)
+			vector[INDEX[not_first]] = 0
+		if vector.sum() == 0: #exit if there is literally no possible next step (unlikely)
+			break
 		else:
 			line = np.random.choice(CHARACTER, p=vector/vector.sum()) + line
-		if line[0] == '\n':
-			line = line[1:] #line-breaks signal the end of the thing
+		if line[0] == '\n': #line-breaks signal the end of the thing
+			line = line[1:]
 			break
 	return line
 
@@ -86,8 +88,13 @@ if __name__ == '__main__':
 		lines.append(markov_chain("\n", transitions, length=PREF_LENGTH, force_length=False))
 		lines.append(markov_chain("\n", transitions, length=len(lines[0])))
 		for j in range(2):
-			seed = lines[j][lines[j].rfind("'"):] if "'" in lines[j] else "\n"
-			lines.append(markov_chain(seed, transitions, length=len(lines[j])))
+			idx = lines[j].rfind("'")
+			if idx > 0:
+				lines.append(markov_chain(lines[j][idx:], transitions, length=len(lines[j]), not_first=lines[j][idx-1]))
+			elif idx < 0:
+				lines.append(markov_chain("\n", transitions, length=len(lines[j])))
+			else:
+				lines.append(lines[j])
 
 		q_text = "".join([line.strip()+"_:_:_:\n" for line in lines])
 		proc = subprocess.run(['espeak','-v','en-us','-s','120','-w',temp,'[['+q_text+']]'], stdout=subprocess.PIPE)
